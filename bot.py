@@ -6,8 +6,9 @@ import handler
 
 logging.basicConfig(level=logging.INFO)
 
+
 async def main():
-    bot = Bot("")
+    bot = Bot("bot-api")
     dp = Dispatcher()
     dp.include_router(handler.router)
 
