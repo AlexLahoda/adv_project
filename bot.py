@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main():
-    bot = Bot("bot-api")
+    bot = Bot("bot_api")
     dp = Dispatcher()
     dp.include_router(handler.router)
 

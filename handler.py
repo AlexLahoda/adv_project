@@ -2,14 +2,14 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram import Router, F
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardRemove
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 import aiohttp
 import json
 from keyboard import make_keyboard
 
 
-API_KEY = "open_weather_api"
+API_KEY = "weather_api"
 router = Router()
 
 period = ['now', '1 day ahead', '2 days ahead', '3 days ahead', '4 days ahead']
@@ -38,47 +38,56 @@ async def cmd_period(message: Message, state: FSMContext):
     Catch all messages with text in period-list, when FSM state is choosing period
     """
     await state.update_data(date = message.text.lower())
-    button = KeyboardButton(text="Send my geo", request_location=True)
+    try:
+        with open('users_loc.json', 'r') as f:
+            users = json.load(f)
+    except:
+        with open('users_loc.json', 'w') as f:
+            users={}
+            json.dump(users, f)    
     builder = ReplyKeyboardBuilder()
+    button = KeyboardButton(text="Send my geo", request_location=True)
     builder.add(button)
+    if str(message.from_user.id) in users:
+        button1 = KeyboardButton(text=f"{users[str(message.from_user.id)][0]}")
+        builder.add(button1)
     await message.answer(
-        text="Send me your location to get weather",
+        text="Type your city or send me your location to get weather",
         reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True)
     )
     await state.set_state(GetWeather.choosing_location)
 
 
-@router.message(StateFilter(GetWeather.choosing_location), F.location)
+@router.message(StateFilter(GetWeather.choosing_location), F.location|F.text)
 async def cmd_location(message: Message, state: FSMContext):
     """
-    Catch all messages with location data, when FSM state is choosing location
+    Catch all messages with location data or text, when FSM state is choosing location
     """
-    place = (message.location.latitude,message.location.longitude)
+    if message.text != None:
+        place = (message.text.strip().lower(),)
+    else:
+        place = (message.location.latitude,message.location.longitude)
     period = await state.get_data()
-    res = await weather_req(place, period['date'])
+    res = await weather_req(place, period['date'], state)
+    with open('users_loc.json', 'r') as f:
+        users = json.load(f)
+    if str(message.from_user.id) in users and users[str(message.from_user.id)] == place:
+        pass
+    elif "city not found" != res[0:14:1]:
+        place = await state.get_data()
+        users[str(message.from_user.id)] = (place['place'],)
+    with open('users_loc.json', 'w') as f:
+        json.dump(users, f)
     await message.answer(
-       res
+       res, 
+       reply_markup=ReplyKeyboardRemove()
     )
     await state.clear()
 
 
-@router.message(StateFilter(GetWeather.choosing_location), F.text)
-async def cmd_text(message: Message, state: FSMContext):
+async def weather_req(place, period, state: FSMContext):
     """
-    Catch all text messages, when FSM state is choosing location
-    """
-    place = (message.text.strip().lower(),)
-    period = await state.get_data()
-    res = await weather_req(place, period['date'])
-    await message.answer(
-        res
-    )
-    await state.clear()
-
-
-async def weather_req(place, period):
-    """
-    Make request to openweather, parse response and return it to handler
+    Make request to openweather, parse response, return it to handler
     """
     if len(place) > 1: 
         query = f"lat={place[0]}&lon={place[1]}"
@@ -118,8 +127,6 @@ Feels: {feels}{'🥶' if feels<0 else '😰' if feels<5 else '😊'}
 Weather: {weather}{'🌧' if 'rain' in weather else '❄️' if 'snow' in weather else '☁️'if 'cloud' in weather else ''}
 Wind{'💨' if wind>7 else '🌬'if wind>3 else ''}: {wind}
 
-To one more request type "/start"
-
 
 '''
         return ret
@@ -128,8 +135,10 @@ To one more request type "/start"
         if 'list' in res:
             for i in res['list']:
                 resp += parse(i, True)
+            await state.update_data(place=f"{res['city']['name']}, {res['city']['country']}")
         else:
             resp = parse(res)
+            await state.update_data(place=f"{res['name']}, {res['sys']['country']}")
     else:
         resp = res["message"]
-    return resp
+    return resp + '\n\n' + 'To one more request type "/start"' + '\n'
